@@ -1,0 +1,22 @@
+# Core packages (optimized versions)
+NumPy
+pandas
+matplotlib
+seaborn
+scikit-learn
+
+# Performance libraries
+joblib  # Faster serialization
+numba # JIT compilation for NumPy
+numexpr  # Fast numerical expression evaluation
+
+# Web app
+streamlit
+
+# I/O optimization
+openpyxl # Fast Excel reading
+pyarrow  # Fast Parquet support
+
+# Additional utilities
+tqdm # Progress bars
+psutil # System monitoring
