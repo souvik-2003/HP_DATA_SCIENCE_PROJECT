@@ -21,6 +21,8 @@ Try out the app here:
 
 🗂️ Project Structure
 
+```
+
 high-performance-data-science-app/
 │
 ├── streamlit_app/
@@ -42,6 +44,7 @@ high-performance-data-science-app/
 ├── requirements.txt              # Optimized dependencies for performance
 ├── README.md                     # This file
 └── .streamlit/config.toml        # Performance-tuned configuration
+```
 
 
 🏗️ Setup & Installation
