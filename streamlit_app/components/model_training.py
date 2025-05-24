@@ -17,6 +17,12 @@ from src.models import train_model_with_missing_support, predict_with_missing_su
 from src.visualization import plot_feature_importance, plot_prediction_vs_actual
 
 
+@st.cache_data
+def cached_analyze_missing_data(df_hash):
+    """Cached version of missing data analysis."""
+    return analyze_missing_data(st.session_state.df)
+
+
 def create_model_training():
     """Create enhanced model training section with missing value handling."""
     st.header("🚀 High-Performance Model Training with Missing Value Support")
@@ -28,8 +34,9 @@ def create_model_training():
     
     df = st.session_state.df
     
-    # Analyze missing data
-    missing_analysis = analyze_missing_data(df)
+    # Analyze missing data with caching
+    df_hash = hash(str(df.values.tobytes()))
+    missing_analysis = cached_analyze_missing_data(df_hash)
     
     # Display missing data information
     if missing_analysis['has_missing']:
@@ -72,6 +79,18 @@ def create_model_training():
                 index=0,
                 help="Auto: Automatically choose best strategy based on data characteristics"
             )
+            
+            # Show strategy explanation
+            strategy_explanations = {
+                "auto": "Automatically selects the best strategy based on your data",
+                "smart": "Uses different strategies based on missing percentage per column",
+                "simple": "Basic median/mode imputation for all missing values",
+                "advanced": "Uses iterative imputation for better accuracy",
+                "knn": "Uses K-Nearest Neighbors to impute missing values",
+                "iterative": "Uses MICE-like iterative imputation",
+                "keep_missing": "Keep missing values (only for gradient boosting models)"
+            }
+            st.caption(f"ℹ️ {strategy_explanations[missing_strategy]}")
         else:
             missing_strategy = "none"
             st.info("No missing value handling needed")
@@ -104,13 +123,13 @@ def create_model_training():
             model_options = {
                 "Linear Regression": "linear_regression",
                 "Random Forest": "random_forest_regression",
-                "Gradient Boosting (Missing Value Support)": "hist_gradient_boosting_regression"
+                "Gradient Boosting (Native Missing Support)": "hist_gradient_boosting_regression"
             }
         else:
             model_options = {
                 "Logistic Regression": "logistic_regression", 
                 "Random Forest": "random_forest_classification",
-                "Gradient Boosting (Missing Value Support)": "hist_gradient_boosting_classification"
+                "Gradient Boosting (Native Missing Support)": "hist_gradient_boosting_classification"
             }
         
         model_display_name = st.selectbox("Select model", list(model_options.keys()))
@@ -118,7 +137,7 @@ def create_model_training():
         
         # Show info about missing value support
         if "gradient_boosting" in model_type:
-            st.info("✅ This model natively supports missing values!")
+            st.success("✅ This model natively supports missing values!")
         elif missing_analysis['has_missing'] and missing_strategy == "keep_missing":
             st.warning("⚠️ This model requires missing value preprocessing")
     
@@ -146,6 +165,7 @@ def create_model_training():
             model_params['max_iter'] = st.slider("Max iterations", 50, 500, 100, 25)
             model_params['learning_rate'] = st.slider("Learning rate", 0.01, 0.3, 0.1, 0.01)
             model_params['max_depth'] = st.slider("Max depth", 1, 10, 3)
+            st.success("🚀 This model can handle missing values natively!")
     
     # Train/test split
     with st.expander("📊 Train/Test Split"):
@@ -282,6 +302,7 @@ def create_model_training():
             st.subheader("📈 Predictions vs Actual")
             fig = plot_prediction_vs_actual(y_test.values, y_pred)
             st.pyplot(fig)
+            plt.close(fig)  # Free memory
         
         else:  # Classification
             from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
@@ -308,6 +329,7 @@ def create_model_training():
             disp = ConfusionMatrixDisplay(confusion_matrix=cm)
             disp.plot(ax=ax)
             st.pyplot(fig)
+            plt.close(fig)  # Free memory
         
         # Feature importance (if available)
         if hasattr(model, 'feature_importances_') or (hasattr(model, 'named_steps') and hasattr(model.named_steps.get('model', model), 'feature_importances_')):
@@ -319,6 +341,7 @@ def create_model_training():
             if hasattr(actual_model, 'feature_importances_'):
                 fig = plot_feature_importance(actual_model, st.session_state.feature_names)
                 st.pyplot(fig)
+                plt.close(fig)  # Free memory
         
         # Save model option
         st.subheader("💾 Save Model")

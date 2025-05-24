@@ -9,6 +9,9 @@ from sklearn.impute import SimpleImputer, KNNImputer
 from sklearn.experimental import enable_iterative_imputer
 from sklearn.impute import IterativeImputer
 from sklearn.preprocessing import StandardScaler
+import warnings
+
+warnings.filterwarnings('ignore')
 
 
 def analyze_missing_data(df: pd.DataFrame) -> Dict[str, Any]:
@@ -79,7 +82,6 @@ def smart_imputation_strategy(df: pd.DataFrame, target_column: Optional[str] = N
     
     # Handle numeric columns
     if numeric_cols:
-        # Use different strategies based on missing data percentage
         for col in numeric_cols:
             missing_pct = (df_imputed[col].isnull().sum() / len(df_imputed)) * 100
             
@@ -91,9 +93,14 @@ def smart_imputation_strategy(df: pd.DataFrame, target_column: Optional[str] = N
                 elif missing_pct <= 15:
                     # Medium missing: use KNN imputation for better accuracy
                     if len(numeric_cols) > 1:  # Need multiple features for KNN
-                        knn_imputer = KNNImputer(n_neighbors=min(5, len(df_imputed) // 10))
-                        df_imputed[numeric_cols] = knn_imputer.fit_transform(df_imputed[numeric_cols])
-                        break  # KNN handles all numeric columns at once
+                        try:
+                            knn_imputer = KNNImputer(n_neighbors=min(5, len(df_imputed) // 10))
+                            df_imputed[numeric_cols] = knn_imputer.fit_transform(df_imputed[numeric_cols])
+                            break  # KNN handles all numeric columns at once
+                        except:
+                            # Fallback to median
+                            imputer = SimpleImputer(strategy='median')
+                            df_imputed[col] = imputer.fit_transform(df_imputed[[col]]).flatten()
                     else:
                         # Fallback to median for single column
                         imputer = SimpleImputer(strategy='median')
@@ -148,42 +155,48 @@ def advanced_imputation(df: pd.DataFrame,
     
     # Handle numeric columns with advanced methods
     if numeric_cols and len(numeric_cols) > 1:
-        if method == 'iterative':
-            # Iterative imputation (similar to MICE)
-            iterative_imputer = IterativeImputer(
-                max_iter=10,
-                random_state=42,
-                n_nearest_features=min(len(numeric_cols), 5)
-            )
-            df_imputed[numeric_cols] = iterative_imputer.fit_transform(df_imputed[numeric_cols])
-            
-        elif method == 'knn':
-            # KNN imputation
-            knn_imputer = KNNImputer(
-                n_neighbors=min(5, len(df_imputed) // 10),
-                weights='distance'
-            )
-            df_imputed[numeric_cols] = knn_imputer.fit_transform(df_imputed[numeric_cols])
-            
-        elif method == 'hybrid':
-            # Use KNN for low missing, iterative for high missing
-            low_missing_cols = []
-            high_missing_cols = []
-            
-            for col in numeric_cols:
-                missing_pct = (df_imputed[col].isnull().sum() / len(df_imputed)) * 100
-                if missing_pct <= 10:
-                    low_missing_cols.append(col)
-                else:
-                    high_missing_cols.append(col)
-            
-            if low_missing_cols:
-                knn_imputer = KNNImputer(n_neighbors=min(5, len(df_imputed) // 10))
-                df_imputed[low_missing_cols] = knn_imputer.fit_transform(df_imputed[low_missing_cols])
-            
-            if high_missing_cols:
-                iterative_imputer = IterativeImputer(max_iter=10, random_state=42)
-                df_imputed[high_missing_cols] = iterative_imputer.fit_transform(df_imputed[high_missing_cols])
+        try:
+            if method == 'iterative':
+                # Iterative imputation (similar to MICE)
+                iterative_imputer = IterativeImputer(
+                    max_iter=10,
+                    random_state=42,
+                    n_nearest_features=min(len(numeric_cols), 5)
+                )
+                df_imputed[numeric_cols] = iterative_imputer.fit_transform(df_imputed[numeric_cols])
+                
+            elif method == 'knn':
+                # KNN imputation
+                knn_imputer = KNNImputer(
+                    n_neighbors=min(5, len(df_imputed) // 10),
+                    weights='distance'
+                )
+                df_imputed[numeric_cols] = knn_imputer.fit_transform(df_imputed[numeric_cols])
+                
+            elif method == 'hybrid':
+                # Use KNN for low missing, iterative for high missing
+                low_missing_cols = []
+                high_missing_cols = []
+                
+                for col in numeric_cols:
+                    missing_pct = (df_imputed[col].isnull().sum() / len(df_imputed)) * 100
+                    if missing_pct <= 10:
+                        low_missing_cols.append(col)
+                    else:
+                        high_missing_cols.append(col)
+                
+                if low_missing_cols:
+                    knn_imputer = KNNImputer(n_neighbors=min(5, len(df_imputed) // 10))
+                    df_imputed[low_missing_cols] = knn_imputer.fit_transform(df_imputed[low_missing_cols])
+                
+                if high_missing_cols:
+                    iterative_imputer = IterativeImputer(max_iter=10, random_state=42)
+                    df_imputed[high_missing_cols] = iterative_imputer.fit_transform(df_imputed[high_missing_cols])
+        except Exception as e:
+            print(f"Advanced imputation failed, falling back to simple imputation: {e}")
+            # Fallback to simple imputation
+            simple_imputer = SimpleImputer(strategy='median')
+            df_imputed[numeric_cols] = simple_imputer.fit_transform(df_imputed[numeric_cols])
     
     elif numeric_cols:  # Single numeric column
         # Fallback to simple imputation
@@ -203,7 +216,7 @@ def load_data(file_path: str) -> pd.DataFrame:
             file_path,
             low_memory=False,
             engine='c',
-            na_values=['', ' ', 'null', 'NULL', 'None', 'NaN', 'nan', '#N/A', 'N/A']
+            na_values=['', ' ', 'null', 'NULL', 'None', 'NaN', 'nan', '#N/A', 'N/A', 'na', 'NA']
         )
     elif ext.lower() in ['.xls', '.xlsx']:
         df = pd.read_excel(file_path, engine='openpyxl')
@@ -233,11 +246,28 @@ def clean_data(df: pd.DataFrame, target_column: Optional[str] = None,
         return df.copy()  # No missing values, return as is
     
     # Apply imputation based on method
-    if imputation_method == 'smart':
-        df_cleaned = smart_imputation_strategy(df, target_column)
-    elif imputation_method == 'simple':
+    try:
+        if imputation_method == 'smart':
+            df_cleaned = smart_imputation_strategy(df, target_column)
+        elif imputation_method == 'simple':
+            df_cleaned = df.copy()
+            # Simple median/mode imputation
+            numeric_cols = df_cleaned.select_dtypes(include=[np.number]).columns
+            categorical_cols = df_cleaned.select_dtypes(include=['object', 'category']).columns
+            
+            if len(numeric_cols) > 0:
+                numeric_imputer = SimpleImputer(strategy='median')
+                df_cleaned[numeric_cols] = numeric_imputer.fit_transform(df_cleaned[numeric_cols])
+            
+            if len(categorical_cols) > 0:
+                cat_imputer = SimpleImputer(strategy='most_frequent')
+                df_cleaned[categorical_cols] = cat_imputer.fit_transform(df_cleaned[categorical_cols])
+        else:
+            df_cleaned = advanced_imputation(df, target_column, imputation_method)
+    except Exception as e:
+        print(f"Imputation failed: {e}. Using simple median/mode imputation.")
+        # Fallback to simple imputation
         df_cleaned = df.copy()
-        # Simple median/mode imputation
         numeric_cols = df_cleaned.select_dtypes(include=[np.number]).columns
         categorical_cols = df_cleaned.select_dtypes(include=['object', 'category']).columns
         
@@ -248,8 +278,6 @@ def clean_data(df: pd.DataFrame, target_column: Optional[str] = None,
         if len(categorical_cols) > 0:
             cat_imputer = SimpleImputer(strategy='most_frequent')
             df_cleaned[categorical_cols] = cat_imputer.fit_transform(df_cleaned[categorical_cols])
-    else:
-        df_cleaned = advanced_imputation(df, target_column, imputation_method)
     
     # Drop rows with all NaN values (if any remain)
     df_cleaned = df_cleaned.dropna(how='all')
@@ -297,9 +325,21 @@ def split_data(df: pd.DataFrame,
     X[float_cols] = X[float_cols].astype('float32')
     
     # Split the data
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=test_size, random_state=random_state, stratify=y if y.dtype == 'object' else None
-    )
+    try:
+        # Try stratified split for classification
+        if y.dtype == 'object' or y.nunique() < 20:
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, test_size=test_size, random_state=random_state, stratify=y
+            )
+        else:
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, test_size=test_size, random_state=random_state
+            )
+    except:
+        # Fallback to regular split
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=test_size, random_state=random_state
+        )
     
     return {
         'X_train': X_train,
@@ -309,7 +349,6 @@ def split_data(df: pd.DataFrame,
     }
 
 
-# Additional utility functions
 def optimize_dtypes(df: pd.DataFrame) -> pd.DataFrame:
     """Optimize data types for memory efficiency and speed."""
     df_optimized = df.copy()
@@ -340,3 +379,49 @@ def optimize_dtypes(df: pd.DataFrame) -> pd.DataFrame:
     df_optimized[float_cols] = df_optimized[float_cols].astype('float32')
     
     return df_optimized
+
+
+def preprocess_features(df: pd.DataFrame, 
+                         categorical_cols: Optional[List[str]] = None, 
+                         numeric_cols: Optional[List[str]] = None) -> pd.DataFrame:
+    """Preprocess features with optimized transformations."""
+    from sklearn.preprocessing import StandardScaler, OneHotEncoder
+    from sklearn.compose import ColumnTransformer
+    from sklearn.pipeline import Pipeline
+    
+    # Automatic column detection if not specified
+    if categorical_cols is None:
+        categorical_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
+    
+    if numeric_cols is None:
+        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    
+    # Optimized preprocessing pipeline
+    numeric_transformer = Pipeline(steps=[
+        ('imputer', SimpleImputer(strategy='median')),
+        ('scaler', StandardScaler())
+    ])
+    
+    categorical_transformer = Pipeline(steps=[
+        ('imputer', SimpleImputer(strategy='most_frequent')),
+        ('onehot', OneHotEncoder(handle_unknown='ignore', sparse_output=False))
+    ])
+    
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ('num', numeric_transformer, numeric_cols),
+            ('cat', categorical_transformer, categorical_cols)
+        ],
+        n_jobs=-1  # Parallel processing
+    )
+    
+    # Apply preprocessing
+    preprocessed_array = preprocessor.fit_transform(df)
+    
+    # Convert back to DataFrame
+    preprocessed_df = pd.DataFrame(
+        preprocessed_array,
+        index=df.index
+    )
+    
+    return preprocessed_df

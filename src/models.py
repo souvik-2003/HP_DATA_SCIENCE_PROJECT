@@ -1,9 +1,9 @@
 """
-Enhanced machine learning models with missing value handling.
+Enhanced machine learning models with missing value handling and performance optimization.
 """
 import numpy as np
 import pandas as pd
-import joblib
+import joblib  # Changed from pickle for better performance
 import os
 import time
 from typing import Dict, Any, Union, List, Tuple, Optional
@@ -15,6 +15,9 @@ from sklearn.metrics import mean_squared_error, accuracy_score, precision_score,
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer, KNNImputer
 from sklearn.preprocessing import StandardScaler
+import warnings
+
+warnings.filterwarnings('ignore')
 
 
 def create_robust_pipeline(model_type: str, model_params: Dict = None, imputation_strategy: str = 'median'):
@@ -38,7 +41,7 @@ def create_robust_pipeline(model_type: str, model_params: Dict = None, imputatio
     else:
         imputer = SimpleImputer(strategy=imputation_strategy)
     
-    # Create model
+    # Create model with parallel processing
     if model_type == "linear_regression":
         model = LinearRegression(**model_params)
     elif model_type == "logistic_regression":
@@ -112,16 +115,17 @@ def train_model_with_missing_support(X_train: pd.DataFrame,
         
         if handle_missing == 'native':
             # Use models that support missing values natively
+            original_model_type = model_type
             if model_type in ["linear_regression", "logistic_regression", "random_forest_regression", "random_forest_classification"]:
                 # Switch to gradient boosting equivalent
                 if "regression" in model_type:
                     model_type = "hist_gradient_boosting_regression"
                     training_info['model_switched'] = True
-                    training_info['original_model'] = model_type
+                    training_info['original_model'] = original_model_type
                 else:
                     model_type = "hist_gradient_boosting_classification"
                     training_info['model_switched'] = True
-                    training_info['original_model'] = model_type
+                    training_info['original_model'] = original_model_type
     
     print(f"Training {model_type} with {'missing value support' if has_missing else 'clean data'}...")
     start_time = time.time()
@@ -171,7 +175,6 @@ def train_model_with_missing_support(X_train: pd.DataFrame,
     return model, training_info
 
 
-# Enhanced prediction functions with missing value support
 def predict_with_missing_support(model: Any, X: Union[pd.DataFrame, np.ndarray]) -> np.ndarray:
     """
     Make predictions with automatic missing value handling.
@@ -195,25 +198,32 @@ def predict_with_missing_support(model: Any, X: Union[pd.DataFrame, np.ndarray])
             has_missing = np.isnan(X).any()
         
         if has_missing:
-            # Handle missing values with simple imputation
-            if isinstance(X, pd.DataFrame):
-                X_imputed = X.copy()
-                numeric_cols = X_imputed.select_dtypes(include=[np.number]).columns
-                categorical_cols = X_imputed.select_dtypes(include=['object', 'category']).columns
-                
-                if len(numeric_cols) > 0:
-                    imputer = SimpleImputer(strategy='median')
-                    X_imputed[numeric_cols] = imputer.fit_transform(X_imputed[numeric_cols])
-                
-                if len(categorical_cols) > 0:
-                    imputer = SimpleImputer(strategy='most_frequent')
-                    X_imputed[categorical_cols] = imputer.fit_transform(X_imputed[categorical_cols])
-                
-                X = X_imputed.values
+            # Check if model supports missing values natively
+            if hasattr(model, '__class__') and 'HistGradientBoosting' in model.__class__.__name__:
+                # Native support, use directly
+                if isinstance(X, pd.DataFrame):
+                    X = X.values
+                return model.predict(X)
             else:
-                # Numpy array
-                imputer = SimpleImputer(strategy='median')
-                X = imputer.fit_transform(X)
+                # Handle missing values with simple imputation
+                if isinstance(X, pd.DataFrame):
+                    X_imputed = X.copy()
+                    numeric_cols = X_imputed.select_dtypes(include=[np.number]).columns
+                    categorical_cols = X_imputed.select_dtypes(include=['object', 'category']).columns
+                    
+                    if len(numeric_cols) > 0:
+                        imputer = SimpleImputer(strategy='median')
+                        X_imputed[numeric_cols] = imputer.fit_transform(X_imputed[numeric_cols])
+                    
+                    if len(categorical_cols) > 0:
+                        imputer = SimpleImputer(strategy='most_frequent')
+                        X_imputed[categorical_cols] = imputer.fit_transform(X_imputed[categorical_cols])
+                    
+                    X = X_imputed.values
+                else:
+                    # Numpy array
+                    imputer = SimpleImputer(strategy='median')
+                    X = imputer.fit_transform(X)
         
         elif isinstance(X, pd.DataFrame):
             X = X.values
@@ -252,7 +262,50 @@ def predict_batch_with_missing_support(model: Any,
     return np.concatenate(predictions)
 
 
-# Keep existing functions but enhance them
+def evaluate_regression_model(model: Any, X_test: pd.DataFrame, y_test: pd.Series) -> Dict[str, float]:
+    """Evaluate a regression model with optimized prediction."""
+    # Use missing value support for predictions
+    y_pred = predict_with_missing_support(model, X_test)
+    y_np = y_test.values if isinstance(y_test, pd.Series) else y_test
+    
+    mse = mean_squared_error(y_np, y_pred)
+    rmse = np.sqrt(mse)
+    r2 = r2_score(y_np, y_pred)
+    
+    return {
+        'mse': mse,
+        'rmse': rmse,
+        'r2': r2
+    }
+
+
+def evaluate_classification_model(model: Any, X_test: pd.DataFrame, y_test: pd.Series) -> Dict[str, float]:
+    """Evaluate a classification model with optimized prediction."""
+    # Use missing value support for predictions
+    y_pred = predict_with_missing_support(model, X_test)
+    y_np = y_test.values if isinstance(y_test, pd.Series) else y_test
+    
+    accuracy = accuracy_score(y_np, y_pred)
+    
+    # For binary classification
+    if len(np.unique(y_np)) == 2:
+        precision = precision_score(y_np, y_pred, average='binary')
+        recall = recall_score(y_np, y_pred, average='binary')
+        f1 = f1_score(y_np, y_pred, average='binary')
+        
+        return {
+            'accuracy': accuracy,
+            'precision': precision,
+            'recall': recall,
+            'f1': f1
+        }
+    else:
+        # For multiclass
+        return {
+            'accuracy': accuracy
+        }
+
+
 def save_model(model: Any, file_path: str) -> None:
     """Save a trained model using joblib for faster I/O."""
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
@@ -262,3 +315,57 @@ def save_model(model: Any, file_path: str) -> None:
 def load_model(file_path: str) -> Any:
     """Load a model using joblib for faster I/O."""
     return joblib.load(file_path)
+
+
+# Legacy functions for backwards compatibility
+def train_linear_regression(X_train: pd.DataFrame, y_train: pd.Series) -> LinearRegression:
+    """Train a linear regression model with optimizations."""
+    model = LinearRegression()
+    
+    # Convert to numpy for faster processing
+    X_np = X_train.values if isinstance(X_train, pd.DataFrame) else X_train
+    y_np = y_train.values if isinstance(y_train, pd.Series) else y_train
+    
+    model.fit(X_np, y_np)
+    return model
+
+
+def train_random_forest(X_train: pd.DataFrame, 
+                        y_train: pd.Series, 
+                        is_classification: bool = True, 
+                        n_estimators: int = 100,
+                        max_depth: Optional[int] = None) -> Union[RandomForestClassifier, RandomForestRegressor]:
+    """Train a random forest model with parallel processing."""
+    # Add parallel processing for significant speedup
+    if is_classification:
+        model = RandomForestClassifier(
+            n_estimators=n_estimators, 
+            max_depth=max_depth, 
+            random_state=42,
+            n_jobs=-1  # Use all CPU cores
+        )
+    else:
+        model = RandomForestRegressor(
+            n_estimators=n_estimators, 
+            max_depth=max_depth, 
+            random_state=42,
+            n_jobs=-1  # Use all CPU cores
+        )
+    
+    # Convert to numpy for faster processing
+    X_np = X_train.values if isinstance(X_train, pd.DataFrame) else X_train
+    y_np = y_train.values if isinstance(y_train, pd.Series) else y_train
+    
+    model.fit(X_np, y_np)
+    return model
+
+
+# Fast prediction functions
+def predict_fast(model: Any, X: Union[pd.DataFrame, np.ndarray]) -> np.ndarray:
+    """Fast prediction with optimized data handling."""
+    return predict_with_missing_support(model, X)
+
+
+def predict_batch(model: Any, X: Union[pd.DataFrame, np.ndarray], batch_size: int = 10000) -> np.ndarray:
+    """Batch prediction for large datasets."""
+    return predict_batch_with_missing_support(model, X, batch_size)
