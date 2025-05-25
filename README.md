@@ -144,7 +144,7 @@ The UI shows real-time performance metrics including processing speed, memory us
 
 📝 License
 
-MIT License. See LICENSE.
+MIT License, See LICENSE
 
 🙏 Acknowledgments
 
@@ -185,7 +185,7 @@ MIT License. See LICENSE.
 - **Storage**: 5GB+ free space (for large datasets)
 - **OS**: Windows 10, macOS 10.14, Ubuntu 18.04 or later
 
-💬 For questions, suggestions, or performance optimization tips—open an Issue or contact: psouvikdutta10@gmail.com!
+💬 For questions, suggestions, or performance optimization tips—open an Issue or contact: psouvikdutta10@gmail.com(SOUVIK DUTTA)!
 
 ---
 
