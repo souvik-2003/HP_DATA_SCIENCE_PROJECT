@@ -174,6 +174,19 @@ def train_model_with_missing_support(X_train: pd.DataFrame,
     
     return model, training_info
 
+# Enable parallel processing for all compatible models
+def train_optimized_model(model_type, X_train, y_train, **params):
+    if model_type == "random_forest":
+        params['n_jobs'] = -1  # Use all CPU cores
+        model = RandomForestRegressor(**params)
+    elif model_type == "logistic_regression":
+        params['n_jobs'] = -1
+        model = LogisticRegression(**params)
+    
+    # Use optimized fit
+    model.fit(X_train.values, y_train.values)  # Convert to numpy for speed
+    return model
+
 
 def predict_with_missing_support(model: Any, X: Union[pd.DataFrame, np.ndarray]) -> np.ndarray:
     """

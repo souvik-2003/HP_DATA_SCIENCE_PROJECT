@@ -206,24 +206,86 @@ def advanced_imputation(df: pd.DataFrame,
     return df_imputed
 
 
-def load_data(file_path: str) -> pd.DataFrame:
-    """Load data with optimized settings and missing value detection."""
-    _, ext = os.path.splitext(file_path)
+def load_data_chunked(file_path, chunksize=50000, max_rows=None):
+    chunks = []
+    progress_bar = st.progress(0)
     
-    if ext.lower() == '.csv':
-        # Optimized CSV reading with missing value handling
-        df = pd.read_csv(
-            file_path,
-            low_memory=False,
-            engine='c',
-            na_values=['', ' ', 'null', 'NULL', 'None', 'NaN', 'nan', '#N/A', 'N/A', 'na', 'NA']
-        )
-    elif ext.lower() in ['.xls', '.xlsx']:
-        df = pd.read_excel(file_path, engine='openpyxl')
+    for i, chunk in enumerate(pd.read_csv(file_path, chunksize=chunksize)):
+        chunk = optimize_dtypes(chunk)  # Optimize immediately
+        chunks.append(chunk)
+        progress_bar.progress(min(i * chunksize / max_rows, 1.0))
+    
+    return pd.concat(chunks, ignore_index=True)
+
+def load_data_with_size_check(file_path: str, max_size_mb: int = 1000) -> pd.DataFrame:
+    """Load data with updated size limits."""
+    
+    # Get file size
+    file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
+    
+    # Updated size check from 200MB to 1000MB
+    if file_size_mb > max_size_mb:
+        raise ValueError(f"File too large ({file_size_mb:.1f}MB). Max: {max_size_mb}MB")
+    
+    # Use different loading strategies based on file size
+    if file_size_mb < 100:
+        # Small files - standard loading
+        return pd.read_csv(file_path, low_memory=False)
+    elif file_size_mb < 500:
+        # Medium files - optimized loading
+        return load_medium_file_optimized(file_path)
     else:
-        raise ValueError(f"Unsupported file extension: {ext}")
+        # Large files (500MB-1GB) - chunked loading
+        return load_large_file_chunked(file_path)
+
+
+def load_large_file_chunked(file_path: str, chunksize: int = 50000) -> pd.DataFrame:
+    """Load very large files (500MB-1GB) in chunks."""
+    chunks = []
+    total_rows = 0
     
-    return df
+    # Progress tracking
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    try:
+        # Estimate total rows for progress
+        with open(file_path, 'r') as f:
+            total_lines = sum(1 for _ in f) - 1  # Subtract header
+        
+        chunk_reader = pd.read_csv(file_path, chunksize=chunksize, low_memory=False)
+        
+        for i, chunk in enumerate(chunk_reader):
+            # Optimize chunk immediately
+            chunk = optimize_dtypes_enhanced(chunk)
+            chunks.append(chunk)
+            total_rows += len(chunk)
+            
+            # Update progress
+            progress = min(total_rows / total_lines, 1.0)
+            progress_bar.progress(progress)
+            status_text.text(f"Processing chunk {i+1}... Rows loaded: {total_rows:,}")
+            
+            # Memory management for very large files
+            if i % 20 == 0:  # Every 20 chunks
+                import gc
+                gc.collect()
+        
+        # Combine chunks
+        status_text.text("Combining chunks...")
+        df = pd.concat(chunks, ignore_index=True, copy=False)
+        
+        progress_bar.empty()
+        status_text.empty()
+        
+        st.success(f"✅ Successfully loaded {len(df):,} rows from {file_size_mb:.1f}MB file")
+        
+        return df
+        
+    except Exception as e:
+        progress_bar.empty()
+        status_text.empty()
+        raise e
 
 
 def clean_data(df: pd.DataFrame, target_column: Optional[str] = None, 
@@ -349,36 +411,28 @@ def split_data(df: pd.DataFrame,
     }
 
 
-def optimize_dtypes(df: pd.DataFrame) -> pd.DataFrame:
-    """Optimize data types for memory efficiency and speed."""
-    df_optimized = df.copy()
+def optimize_dtypes_aggressive(df):
+    original_memory = df.memory_usage(deep=True).sum()
     
-    # Optimize integer columns
-    int_cols = df_optimized.select_dtypes(include=['int64']).columns
-    for col in int_cols:
-        col_min = df_optimized[col].min()
-        col_max = df_optimized[col].max()
-        
-        if col_min >= 0:
-            if col_max < 255:
-                df_optimized[col] = df_optimized[col].astype('uint8')
-            elif col_max < 65535:
-                df_optimized[col] = df_optimized[col].astype('uint16')
-            elif col_max < 4294967295:
-                df_optimized[col] = df_optimized[col].astype('uint32')
-        else:
-            if col_min > -128 and col_max < 127:
-                df_optimized[col] = df_optimized[col].astype('int8')
-            elif col_min > -32768 and col_max < 32767:
-                df_optimized[col] = df_optimized[col].astype('int16')
-            elif col_min > -2147483648 and col_max < 2147483647:
-                df_optimized[col] = df_optimized[col].astype('int32')
+    # Downcast integers
+    for col in df.select_dtypes(include=['int64']).columns:
+        df[col] = pd.to_numeric(df[col], downcast='integer')
     
-    # Optimize float columns
-    float_cols = df_optimized.select_dtypes(include=['float64']).columns
-    df_optimized[float_cols] = df_optimized[float_cols].astype('float32')
+    # Downcast floats
+    for col in df.select_dtypes(include=['float64']).columns:
+        df[col] = pd.to_numeric(df[col], downcast='float')
     
-    return df_optimized
+    # Convert to categorical for low cardinality strings
+    for col in df.select_dtypes(include=['object']).columns:
+        if df[col].nunique() / len(df) < 0.5:
+            df[col] = df[col].astype('category')
+    
+    new_memory = df.memory_usage(deep=True).sum()
+    savings = (1 - new_memory/original_memory) * 100
+    st.info(f"💾 Memory reduced by {savings:.1f}%")
+    
+    return df
+
 
 
 def preprocess_features(df: pd.DataFrame, 

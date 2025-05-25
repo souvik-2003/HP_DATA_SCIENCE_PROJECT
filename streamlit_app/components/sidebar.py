@@ -53,6 +53,20 @@ def generate_sample_data(n_samples):
     
     return df
 
+# Add chunked file reading
+def load_large_file_optimized(uploaded_file, max_size_mb=500):
+    file_size_mb = len(uploaded_file.getvalue()) / (1024 * 1024)
+    
+    if file_size_mb > max_size_mb:
+        st.error(f"File too large ({file_size_mb:.1f}MB). Max: {max_size_mb}MB")
+        return None
+    
+    # For large files, offer sampling options
+    if file_size_mb > 50:
+        sample_option = st.radio("Large file detected:", 
+                               ["Load sample", "Load first N rows", "Load full (slower)"])
+
+
 
 def create_sidebar():
     """Create optimized sidebar with performance enhancements."""
