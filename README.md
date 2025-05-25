@@ -7,7 +7,7 @@ Built with Python, Streamlit, Scikit-learn, and optimized algorithms for maximum
 🚀 Live Demo
 
 Try out the app here:
-[https://your-high-performance-data-science-app.streamlit.app/](https://souvik-2003-hp-data-science-project-streamlit-appapp-jpieos.streamlit.app/)
+[https://your-high-performance-data-science-app.streamlit.app/](https://souvik-2003-hp-data-science-project-streamlit-appapp-i8zfmy.streamlit.app/#high-performance-visualizations)
 
 🚀 Features
 
